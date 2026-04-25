@@ -1,0 +1,85 @@
+import tensorflow as tf
+import tensorflow.keras.layers as tfl
+import os
+
+from tensorflow.keras.datasets import cifar10
+
+train_ds, test_ds = cifar10.load_data() # Load the datset
+split = int(train_ds[0].shape[0]*.8)
+train_ds,val_ds = \
+(train_ds[0][:split],train_ds[1][:split]),(train_ds[0][split:],train_ds[1][split:])
+data_augumentation = tf.keras.Sequential([
+    tfl.Rescaling(1./255),
+    tfl.RandomFlip(mode="horizontal"),
+    tfl.RandomRotation(factor=.1),
+    tfl.RandomContrast(factor=(.2,.9),),
+    tfl.RandomZoom(height_factor=(.1,.3))
+])
+
+def preprocess(x,y):
+    return data_augumentation(x), tf.one_hot(tf.squeeze(y),10)
+
+train_ds = \
+tf.data.Dataset.from_tensor_slices(train_ds).map(preprocess).batch(64)
+val_ds = tf.data.Dataset.from_tensor_slices(val_ds).map(preprocess).batch(64)
+test_ds = \
+tf.data.Dataset.from_tensor_slices(test_ds).map(preprocess).batch(64)
+
+train_ds
+
+# Loading weights from a pretrained model
+base_model = tf.keras.applications.VGG19(include_top=False,weights =
+"imagenet",input_shape=(32,32,3))
+
+base_model.summary()
+
+for layer in base_model.layers[:-5]:
+    layer.trainable=False
+
+base_model.summary()
+
+model = tf.keras.Sequential([
+    base_model,
+    tfl.Flatten(),
+    tfl.Dense(256,activation="relu"),
+    tfl.Dense(128,activation="relu"),
+    tfl.Dense(64,activation="relu"),
+    tfl.Dense(10,activation = "softmax")
+])
+
+model.summary()
+
+model.compile(
+    optimizer='adam',
+    loss=tf.keras.losses.CategoricalCrossentropy(),
+    metrics=['accuracy']
+)
+
+model.fit(
+    train_ds,
+    validation_data = val_ds,
+    epochs=50,
+    callbacks=[
+        tf.keras.callbacks.TensorBoard(log_dir="logs")
+    ]
+)
+
+%load_ext tensorboard
+%tensorboard --logdir logs
+
+# Evaluating the model
+loss, accuracy = model.evaluate(test_ds)
+
+print("Loss: ", loss)
+print("Accuracy: ", accuracy)
+
+ image, label = next(iter(val_ds))
+images = image.numpy()[:9]
+res = tf.argmax(model(image), axis=-1)
+plt.suptitle("Inference")
+for i, (img, r) in enumerate(zip(images, res)):
+    plt.subplot(331+i)
+    plt.title( f"{tf.argmax(label[i])} - {res[i]}")
+    plt.imshow(img)
+    plt.axis("off")
+plt.show()
